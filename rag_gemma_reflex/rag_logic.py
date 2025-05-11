@@ -12,8 +12,11 @@ from langchain.chains import create_retrieval_chain
 from dotenv import load_dotenv
 import ollama as ollama_client
 import traceback
+import time
+import requests
+from typing import Optional, Tuple
 
-# Load environment variables (optional, for OLLAMA_HOST)
+# Load environment variables
 load_dotenv()
 
 # --- Configuration ---
@@ -21,8 +24,11 @@ DEFAULT_OLLAMA_MODEL = "gemma3:4b-it-qat"
 DATASET_NAME = "neural-bridge/rag-dataset-12000"
 DATASET_SUBSET_SIZE = 100  # Keep subset for faster initial load
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
+DEFAULT_TEMPERATURE = 0.7
+
 # Ensure you have pulled this model via `ollama pull <model_name>`
-# You can override this by setting the OLLAMA_MODEL environment variable
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
 FAISS_INDEX_PATH = "faiss_index_neural_bridge"  # Path for this dataset's index
 
@@ -30,6 +36,30 @@ FAISS_INDEX_PATH = "faiss_index_neural_bridge"  # Path for this dataset's index
 # --- Global Variables ---
 _retriever = None
 _rag_chain = None
+_conversation_history = []
+
+
+def check_ollama_connection(base_url: Optional[str] = None) -> bool:
+    """Check if Ollama server is responsive."""
+    try:
+        url = f"{base_url or 'http://localhost:11434'}/api/health"
+        response = requests.get(url, timeout=5)
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
+
+def wait_for_ollama_server(max_retries: int = MAX_RETRIES, delay: int = RETRY_DELAY) -> bool:
+    """Wait for Ollama server to become available."""
+    base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    for attempt in range(max_retries):
+        if check_ollama_connection(base_url):
+            print("Successfully connected to Ollama server.")
+            return True
+        if attempt < max_retries - 1:
+            print(f"Waiting for Ollama server... (attempt {attempt + 1}/{max_retries})")
+            time.sleep(delay)
+    return False
 
 
 # --- Helper Functions ---
@@ -111,9 +141,14 @@ def create_or_load_vector_store(documents, embeddings):
     return vector_store
 
 
-def get_ollama_llm():
-    """Initializes and returns the Ollama LLM using the new package."""
+def get_ollama_llm(temperature: float = DEFAULT_TEMPERATURE) -> Optional[Ollama]:
+    """Initializes and returns the Ollama LLM with retry logic."""
     global OLLAMA_MODEL
+
+    if not wait_for_ollama_server():
+        print("Error: Could not connect to Ollama server.")
+        return None
+
     current_ollama_model = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
     if OLLAMA_MODEL != current_ollama_model:
         print(f"Ollama model changed to '{current_ollama_model}'.")
@@ -138,18 +173,29 @@ def get_ollama_llm():
         return None
 
     ollama_base_url = os.getenv("OLLAMA_HOST")
-    if ollama_base_url:
-        print(f"Using Ollama host: {ollama_base_url}")
-        llm = Ollama(model=OLLAMA_MODEL, base_url=ollama_base_url)
-    else:
-        print("Using default Ollama host (http://localhost:11434).")
-        llm = Ollama(model=OLLAMA_MODEL)
-    print("Ollama LLM initialized.")
-    return llm
+    try:
+        if ollama_base_url:
+            print(f"Using Ollama host: {ollama_base_url}")
+            llm = Ollama(
+                model=OLLAMA_MODEL,
+                base_url=ollama_base_url,
+                temperature=temperature
+            )
+        else:
+            print("Using default Ollama host (http://localhost:11434).")
+            llm = Ollama(
+                model=OLLAMA_MODEL,
+                temperature=temperature
+            )
+        print("Ollama LLM initialized.")
+        return llm
+    except Exception as e:
+        print(f"Failed to initialize Ollama LLM: {e}")
+        return None
 
 
-def setup_rag_chain():
-    """Sets up the complete RAG chain."""
+def setup_rag_chain(temperature: float = DEFAULT_TEMPERATURE):
+    """Sets up the complete RAG chain with conversation memory."""
     global _retriever, _rag_chain
     if _rag_chain is not None:
         current_ollama_model_env = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
@@ -160,14 +206,10 @@ def setup_rag_chain():
                 print("RAG chain already initialized and model unchanged.")
                 return _retriever, _rag_chain
             else:
-                print(
-                    f"Ollama model has changed (expected '{current_ollama_model_env}', found '{chain_model_name}'). Re-initializing RAG chain."
-                )
+                print(f"Ollama model has changed. Re-initializing RAG chain.")
                 _rag_chain = None
         except AttributeError:
-            print(
-                "Could not verify model name in existing chain. Re-initializing RAG chain."
-            )
+            print("Could not verify model name in existing chain. Re-initializing RAG chain.")
             _rag_chain = None
 
     print("Setting up RAG chain...")
@@ -182,47 +224,100 @@ def setup_rag_chain():
         print("Vector store creation/loading failed. Cannot create RAG chain.")
         return None, None
 
-    llm = get_ollama_llm()
+    llm = get_ollama_llm(temperature=temperature)
     if llm is None:
         print("LLM initialization failed. Cannot create RAG chain.")
         _rag_chain = None
         _retriever = None
         return _retriever, _rag_chain
 
-    _retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+    _retriever = vector_store.as_retriever(search_kwargs={"k": 4})
     print("Retriever created.")
 
-    template = """
-    You are an assistant for question-answering tasks.
-    Use the following pieces of retrieved context to answer the question.
-    If you don't know the answer, just say that you don't know.
-    Use three sentences maximum and keep the answer concise.
+    template = """You are a helpful AI assistant engaging in a conversation. Use the following pieces of context and conversation history to provide accurate, relevant, and natural responses.
 
-    Question: {input}
+    Context from documents:
+    {context}
 
-    Context: {context}
+    Conversation history:
+    {chat_history}
 
-    Answer:
-    """
+    Current question: {input}
+
+    Instructions:
+    1. Use the context and conversation history to provide a coherent response
+    2. If the context doesn't contain relevant information, acknowledge what you know and what you don't
+    3. Keep responses concise but informative
+    4. Maintain a friendly and helpful tone
+    5. If referring to previous conversation, do so naturally
+    6. Format technical information clearly
+
+    Answer: """
+
     prompt = ChatPromptTemplate.from_template(template)
-    print("Prompt template created.")
+    print("Enhanced prompt template created.")
 
-    question_answer_chain = create_stuff_documents_chain(llm, prompt)
-    print("Stuff documents chain created.")
+    # Create the RAG chain with the updated prompt
+    question_answer_chain = create_stuff_documents_chain(
+        llm=llm,
+        prompt=prompt,
+    )
+    print("Enhanced QA chain created.")
 
     _rag_chain = create_retrieval_chain(_retriever, question_answer_chain)
-    print("RAG retrieval chain created successfully.")
+    print("Enhanced RAG chain created successfully.")
 
     return _retriever, _rag_chain
 
 
-def get_rag_chain():
-    """Returns the initialized RAG chain, setting it up if necessary."""
+def add_to_conversation_history(question: str, answer: str):
+    """Add a Q&A pair to the conversation history."""
+    global _conversation_history
+    _conversation_history.append((question, answer))
+    # Keep only the last 5 exchanges to maintain context without overwhelming
+    _conversation_history = _conversation_history[-5:]
+
+
+def get_conversation_history() -> str:
+    """Format conversation history for the prompt."""
+    if not _conversation_history:
+        return "No previous conversation."
+    
+    history = []
+    for i, (q, a) in enumerate(_conversation_history, 1):
+        history.append(f"Q{i}: {q}")
+        history.append(f"A{i}: {a}")
+    return "\n".join(history)
+
+
+def get_rag_response(question: str, temperature: float = DEFAULT_TEMPERATURE) -> Tuple[str, bool]:
+    """Get a response from the RAG chain with conversation history."""
+    global _rag_chain
+    
     if _rag_chain is None:
-        setup_rag_chain()
+        setup_rag_chain(temperature=temperature)
+    
     if _rag_chain is None:
-        print("Warning: RAG chain is not available.")
-    return _rag_chain
+        return "System is not available. Please check the logs.", False
+
+    try:
+        # Include conversation history in the context
+        chat_history = get_conversation_history()
+        
+        response = _rag_chain.invoke({
+            "input": question,
+            "chat_history": chat_history
+        })
+        
+        answer = response.get("answer", "Sorry, I couldn't generate a response.")
+        add_to_conversation_history(question, answer)
+        return answer, True
+    
+    except Exception as e:
+        error_msg = f"An error occurred: {str(e)}"
+        print(error_msg)
+        print(traceback.format_exc())
+        return error_msg, False
 
 
 # --- Example Usage (for testing this module directly) ---
