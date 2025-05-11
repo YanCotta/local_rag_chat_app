@@ -1,6 +1,7 @@
 """Styles for the RAG chat application."""
+from typing import Dict, Any
 
-colors = {
+colors: Dict[str, str] = {
     "bg_dark": "#1a1a1a",
     "bg_light": "#ffffff",
     "primary": "#3B82F6",
