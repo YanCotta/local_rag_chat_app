@@ -1,139 +1,15 @@
+"""Main UI file for the RAG chat application."""
 import reflex as rx
-from .state import State, QA
+from . import styles
+from . import components
+from .state import State
 
-# --- UI Styles ---
-
-colors = {
-    "background": "#0F0F10",
-    "text_primary": "#E3E3E3",
-    "text_secondary": "#BDC1C6",
-    "input_bg": "#1F1F21",
-    "input_border": "#3C4043",
-    "button_bg": "#8AB4F8",
-    "button_text": "#202124",
-    "button_hover_bg": "#AECBFA",
-    "user_bubble_bg": "#3C4043",
-    "bot_bubble_bg": "#1E1F21",
-    "bubble_border": "#5F6368",
-    "loading_text": "#9AA0A6",
-    "heading_gradient_start": "#8AB4F8",
-    "heading_gradient_end": "#C3A0F8",
-}
-
-base_style = {
-    "background_color": colors["background"],
-    "color": colors["text_primary"],
-    "font_family": "'Roboto', sans-serif",
-    "font_weight": "200",
-    "height": "100vh",
-    "width": "100%",
-}
-
-input_style = {
-    "background_color": colors["input_bg"],
-    "border": f"1px solid {colors['input_border']}",
-    "color": colors["text_primary"],
-    "border_radius": "24px",
-    "padding": "12px 18px",
-    "width": "100%",
-    "font_weight": "400",
-    "_placeholder": {
-        "color": colors["text_secondary"],
-        "font_weight": "300",
-    },
-    ":focus": {
-        "border_color": colors["button_bg"],
-        "box_shadow": f"0 0 0 1px {colors['button_bg']}",
-    },
-}
-
-button_style = {
-    "background_color": colors["button_bg"],
-    "color": colors["button_text"],
-    "border": "none",
-    "border_radius": "24px",
-    "padding": "12px 20px",
-    "cursor": "pointer",
-    "font_weight": "500",
-    "font_family": "'Roboto', sans-serif",
-    "transition": "background-color 0.2s ease",
-    ":hover": {
-        "background_color": colors["button_hover_bg"],
-    },
-}
-
-chat_box_style = {
-    "padding": "1em 0",
-    "flex_grow": 1,
-    "overflow_y": "auto",
-    "display": "flex",
-    "flex_direction": "column-reverse",
-    "width": "100%",
-    "&::-webkit-scrollbar": {
-        "width": "8px",
-    },
-    "&::-webkit-scrollbar-track": {
-        "background": colors["input_bg"],
-        "border_radius": "4px",
-    },
-    "&::-webkit-scrollbar-thumb": {
-        "background": colors["bubble_border"],
-        "border_radius": "4px",
-    },
-    "&::-webkit-scrollbar-thumb:hover": {
-        "background": colors["text_secondary"],
-    },
-}
-
-qa_style = {
-    "margin_bottom": "1em",
-    "padding": "12px 18px",
-    "border_radius": "18px",
-    "word_wrap": "break-word",
-    "max_width": "85%",
-    "box_shadow": "0 1px 3px 0 rgba(0, 0, 0, 0.15)",
-    "line_height": "1.6",
-    "font_weight": "400",
-    "code": {
-        "background_color": "rgba(255, 255, 255, 0.1)",
-        "padding": "0.2em 0.4em",
-        "font_size": "85%",
-        "border_radius": "4px",
-        "font_family": "monospace",
-    },
-    "a": {
-        "color": colors["button_bg"],
-        "text_decoration": "underline",
-        ":hover": {
-            "color": colors["button_hover_bg"],
-        },
-    },
-    "p": {
-        "margin": "0",
-    },
-}
-
-question_style = {
-    **qa_style,
-    "background_color": colors["user_bubble_bg"],
-    "color": colors["text_primary"],
-    "align_self": "flex-end",
-    "border_bottom_right_radius": "4px",
-}
-
-answer_style = {
-    **qa_style,
-    "background_color": colors["bot_bubble_bg"],
-    "color": colors["text_primary"],
-    "align_self": "flex-start",
-    "border_bottom_left_radius": "4px",
-}
-
-loading_style = {
-    "color": colors["loading_text"],
-    "font_style": "italic",
-    "font_weight": "300",
-}
+# Import styles and components
+colors = styles.colors
+animations = styles.animations
+base_style = styles.base_style
+input_style = styles.input_style
+button_style = styles.button_style
 
 # --- UI Components ---
 
@@ -206,6 +82,7 @@ def index() -> rx.Component:
         "-webkit-background-clip": "text",
         "color": "transparent",
         "width": "fit-content",
+        "animation": animations["fade_in"],
     }
 
     return rx.container(
