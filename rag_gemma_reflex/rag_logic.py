@@ -14,12 +14,19 @@ import ollama as ollama_client
 import traceback
 import time
 import requests
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
+from datetime import datetime
+import json
+import math
+from tqdm import tqdm
 
 # Load environment variables
 load_dotenv()
 
 # --- Configuration ---
+BATCH_SIZE = 32  # Batch size for embeddings
+MAX_RETRIES = 3  # Maximum number of retries for Ollama connection
+RETRY_DELAY = 2  # Delay between retries in seconds
 DEFAULT_OLLAMA_MODEL = "gemma3:4b-it-qat"
 DATASET_NAME = "neural-bridge/rag-dataset-12000"
 DATASET_SUBSET_SIZE = 100  # Keep subset for faster initial load
@@ -110,33 +117,90 @@ def get_embeddings_model():
 
 def create_or_load_vector_store(documents, embeddings):
     """Creates a FAISS vector store from documents or loads it if it exists."""
+    index_version_file = os.path.join(FAISS_INDEX_PATH, "version.json")
+    current_version = {
+        "model": EMBEDDING_MODEL_NAME,
+        "dataset": DATASET_NAME,
+        "subset_size": DATASET_SUBSET_SIZE,
+        "timestamp": None
+    }
+
     if os.path.exists(FAISS_INDEX_PATH) and os.listdir(FAISS_INDEX_PATH):
         print(f"Loading existing FAISS index from '{FAISS_INDEX_PATH}'...")
         try:
-            vector_store = FAISS.load_local(
-                FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True
-            )
-            print("FAISS index loaded.")
+            # Check index version
+            if os.path.exists(index_version_file):
+                with open(index_version_file, 'r') as f:
+                    stored_version = json.load(f)
+                
+                if (stored_version.get("model") == current_version["model"] and 
+                    stored_version.get("dataset") == current_version["dataset"] and
+                    stored_version.get("subset_size") == current_version["subset_size"]):
+                    vector_store = FAISS.load_local(
+                        FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True
+                    )
+                    print("FAISS index loaded successfully.")
+                    return vector_store
+            
+            print("Index version mismatch or missing version file. Rebuilding index...")
+            vector_store = None
         except Exception as e:
             print(f"Error loading FAISS index: {e}")
             print("Attempting to rebuild the index...")
             vector_store = None
     else:
-        vector_store = None
-
-    if vector_store is None:
+        vector_store = None    if vector_store is None:
         if not documents:
             print("Error: No documents loaded to create FAISS index.")
             return None
+
         print("Creating new FAISS index...")
-        vector_store = FAISS.from_documents(documents, embeddings)
-        print("FAISS index created.")
-        print(f"Saving FAISS index to '{FAISS_INDEX_PATH}'...")
         try:
-            vector_store.save_local(FAISS_INDEX_PATH)
-            print("FAISS index saved.")
+            # Process documents in batches
+            num_documents = len(documents)
+            num_batches = math.ceil(num_documents / BATCH_SIZE)
+            
+            # Create empty vector store for first batch
+            texts = [doc.page_content for doc in documents[:BATCH_SIZE]]
+            metadatas = [doc.metadata for doc in documents[:BATCH_SIZE]]
+            vector_store = FAISS.from_texts(texts, embeddings, metadatas=metadatas)
+            
+            # Process remaining batches
+            with tqdm(total=num_documents, desc="Processing documents") as pbar:
+                pbar.update(BATCH_SIZE)
+                
+                for i in range(1, num_batches):
+                    start_idx = i * BATCH_SIZE
+                    end_idx = min((i + 1) * BATCH_SIZE, num_documents)
+                    batch_documents = documents[start_idx:end_idx]
+                    
+                    texts = [doc.page_content for doc in batch_documents]
+                    metadatas = [doc.metadata for doc in batch_documents]
+                    
+                    vector_store.add_texts(texts, metadatas=metadatas)
+                    pbar.update(end_idx - start_idx)
+
+            print("FAISS index created successfully.")
+            
+            # Save the index with version information
+            print(f"Saving FAISS index to '{FAISS_INDEX_PATH}'...")
+            try:
+                os.makedirs(FAISS_INDEX_PATH, exist_ok=True)
+                vector_store.save_local(FAISS_INDEX_PATH)
+                
+                # Save version information
+                current_version["timestamp"] = datetime.now().isoformat()
+                with open(os.path.join(FAISS_INDEX_PATH, "version.json"), 'w') as f:
+                    json.dump(current_version, f, indent=2)
+                
+                print("FAISS index and version information saved.")
+            except Exception as e:
+                print(f"Error saving FAISS index: {e}")
+                print(traceback.format_exc())
         except Exception as e:
-            print(f"Error saving FAISS index: {e}")
+            print(f"Error creating FAISS index: {e}")
+            print(traceback.format_exc())
+            return None
 
     return vector_store
 
