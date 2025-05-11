@@ -1,9 +1,11 @@
 import reflex as rx
 from . import rag_logic
+from . import error_handling
 import traceback
 import json
+import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Any
 import re
 
 
@@ -30,10 +32,58 @@ class State(rx.State):
     is_loading: bool = False
     system_status: Optional[str] = None
     show_settings: bool = False
+    initialization_status: str = "Not Started"
+    initialization_progress: float = 0
+    error_message: Optional[str] = None
     
     # Model settings
     temperature: float = 0.7
     streaming: bool = True
+    
+    def __init__(self):
+        """Initialize the state and start async initialization."""
+        super().__init__()
+        self.initialize_rag_system()
+    
+    async def initialize_rag_system(self):
+        """Initialize the RAG system with progress updates."""
+        try:
+            self.initialization_status = "Initializing..."
+            self.initialization_progress = 0.1
+            yield
+            
+            # Check Ollama connection
+            self.initialization_status = "Checking Ollama connection..."
+            self.initialization_progress = 0.2
+            yield
+            
+            if not rag_logic.wait_for_ollama_server():
+                raise Exception("Could not connect to Ollama server")
+            
+            # Load documents
+            self.initialization_status = "Loading documents..."
+            self.initialization_progress = 0.4
+            yield
+            
+            # Initialize RAG chain
+            self.initialization_status = "Setting up RAG chain..."
+            self.initialization_progress = 0.6
+            yield
+            
+            chain = rag_logic.get_rag_chain()
+            if chain is None:
+                raise Exception("Failed to initialize RAG chain")
+            
+            self.initialization_status = "Ready"
+            self.initialization_progress = 1.0
+            self.add_system_message("System initialized successfully!")
+            
+        except Exception as e:
+            self.initialization_status = "Error"
+            self.error_message = str(e)
+            self.add_system_message(f"Error during initialization: {str(e)}")
+            print(f"Initialization error: {e}")
+            print(traceback.format_exc())
 
     def set_temperature(self, value: float):
         """Update the temperature parameter."""
@@ -98,52 +148,133 @@ class State(rx.State):
         for word in words:
             current_answer += word + " "
             self.chat_history[-1].answer = self.format_code_blocks(current_answer.strip())
-            yield
-
-    async def handle_submit(self):
+            yield    async def handle_submit(self):
         """Handles the user submitting a question."""
+        # Input validation
         if not self.question.strip():
             return
 
-        user_question = self.question
-        self.chat_history.append(QA(question=user_question, answer="", is_loading=True))
-        self.question = ""
-        yield
+        # Check system status
+        if self.initialization_status != "Ready":
+            self.add_system_message("System is still initializing. Please wait...")
+            return
 
-        try:
-            # Update system status
-            self.system_status = "Processing your question..."
+        # Initialize conversation entry
+        user_question = self.question
+        self.question = ""
+        
+        # Create error boundary
+        async with error_handling.ErrorBoundary(
+            on_error=lambda e: self.add_system_message(f"Error: {str(e)}")
+        ) as boundary:
+            # Add question to chat history
+            self.chat_history.append(QA(question=user_question, answer="", is_loading=True))
             yield
-            
-            answer, success = rag_logic.get_rag_response(
-                user_question, 
-                temperature=self.temperature
+
+            # Configure retry behavior
+            retry_config = error_handling.RetryConfig(
+                max_retries=3,
+                delay=2.0,
+                backoff_factor=1.5
             )
 
-            if not success:
-                self.chat_history[-1].answer = "Sorry, I couldn't process your question. Please try again."
+            # Process the question with retries
+            result, success = await error_handling.with_retries(
+                rag_logic.get_rag_response,
+                user_question,
+                temperature=self.temperature,
+                retry_config=retry_config,
+                on_retry=lambda attempt, e: self.update_status(f"Retrying ({attempt})...")
+            )
+
+            if success:
+                if self.streaming:
+                    self.chat_history[-1].is_loading = False
+                    async for _ in self.stream_answer(result):
+                        yield
+                else:
+                    self.chat_history[-1].answer = self.format_code_blocks(result)
+                    self.chat_history[-1].is_loading = False
+            else:
+                error_msg = error_handling.format_error_message(
+                    boundary.error if boundary.error else Exception("Failed to get response"),
+                    user_friendly=True
+                )
+                self.chat_history[-1].answer = error_msg
                 self.chat_history[-1].is_loading = False
                 self.chat_history[-1].is_error = True
-                self.system_status = "Failed to process question"
-                return
-
-            if self.streaming:
-                self.chat_history[-1].is_loading = False
-                async for _ in self.stream_answer(answer):
-                    yield
-            else:
-                self.chat_history[-1].answer = self.format_code_blocks(answer)
-                self.chat_history[-1].is_loading = False
 
             self.system_status = None
-
-        except Exception as e:
-            print(f"Error processing question: {e}")
-            print(traceback.format_exc())
-            self.chat_history[-1].answer = f"An error occurred. Please try again later."
+            
+        # Ensure loading state is reset
+        if self.chat_history and self.chat_history[-1].is_loading:
             self.chat_history[-1].is_loading = False
-            self.chat_history[-1].is_error = True
-            self.system_status = "Error occurred"
+
+        max_retries = rag_logic.MAX_RETRIES
+        retry_delay = rag_logic.RETRY_DELAY
+        attempt = 0
+
+        while attempt < max_retries:
+            try:
+                self.system_status = f"Processing your question (attempt {attempt + 1}/{max_retries})..."
+                yield
+
+                answer, success = rag_logic.get_rag_response(
+                    user_question, 
+                    temperature=self.temperature
+                )
+
+                if success:
+                    if self.streaming:
+                        qa_entry.is_loading = False
+                        async for _ in self.stream_answer(answer):
+                            yield
+                    else:
+                        qa_entry.answer = self.format_code_blocks(answer)
+                        qa_entry.is_loading = False
+
+                    self.system_status = None
+                    return
+                
+                attempt += 1
+                if attempt < max_retries:
+                    self.system_status = f"Retrying in {retry_delay}s ({attempt}/{max_retries})"
+                    yield
+                    await asyncio.sleep(retry_delay)
+                else:
+                    raise Exception("Maximum retry attempts reached")
+
+            except Exception as e:
+                print(f"Error processing question (attempt {attempt + 1}): {e}")
+                print(traceback.format_exc())
+                
+                if attempt < max_retries - 1:
+                    attempt += 1
+                    self.system_status = f"Retrying in {retry_delay}s ({attempt}/{max_retries})"
+                    yield
+                    await asyncio.sleep(retry_delay)
+                else:
+                    error_message = (
+                        "I apologize, but I encountered an error while processing your "
+                        "question. This might be due to:\n\n"
+                        "1. Connection issues with the language model\n"
+                        "2. Problems processing your query\n"
+                        "3. System resource constraints\n\n"
+                        "Please try again in a moment."
+                    )
+                    qa_entry.answer = error_message
+                    qa_entry.is_loading = False
+                    qa_entry.is_error = True
+                    self.system_status = "Error occurred"
+                    return
+                    
         finally:
-            if self.chat_history:
-                self.chat_history[-1].is_loading = False
+            if qa_entry.is_loading:
+                qa_entry.is_loading = False
+                qa_entry.is_error = True
+                qa_entry.answer = "Request timed out. Please try again."
+                self.system_status = "Timed out"
+
+    def update_status(self, status: str):
+        """Update the system status message."""
+        self.system_status = status
