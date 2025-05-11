@@ -153,6 +153,45 @@ def message_bubble(qa: QA):
     )
 
 
+def settings_panel() -> rx.Component:
+    """Creates a settings panel component."""
+    return rx.hstack(
+        rx.vstack(
+            rx.text("Temperature:", color=colors["text_secondary"]),
+            rx.slider(
+                value=State.temperature,
+                min_=0.0,
+                max_=1.0,
+                step=0.1,
+                on_change=State.set_temperature,
+                width="150px",
+            ),
+            rx.text(
+                f"{State.temperature:.1f}",
+                color=colors["text_secondary"],
+                font_size="0.8em",
+            ),
+            align_items="center",
+            spacing="2",
+        ),
+        rx.vstack(
+            rx.text("Streaming:", color=colors["text_secondary"]),
+            rx.switch(
+                is_checked=State.streaming,
+                on_change=State.toggle_streaming,
+            ),
+            align_items="center",
+            spacing="2",
+        ),
+        justify_content="center",
+        spacing="8",
+        padding="1em",
+        background=colors["input_bg"],
+        border_radius="md",
+        margin="1em 0",
+    )
+
+
 # --- Main Page ---
 
 
@@ -182,6 +221,7 @@ def index() -> rx.Component:
                 width="100%",
                 text_align="center",
             ),
+            settings_panel(),
             rx.box(
                 rx.foreach(State.chat_history, message_bubble),
                 style=chat_box_style,
