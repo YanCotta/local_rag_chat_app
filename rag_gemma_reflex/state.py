@@ -148,7 +148,9 @@ class State(rx.State):
         for word in words:
             current_answer += word + " "
             self.chat_history[-1].answer = self.format_code_blocks(current_answer.strip())
-            yield    async def handle_submit(self):
+            yield
+
+    async def handle_submit(self):
         """Handles the user submitting a question."""
         # Input validation
         if not self.question.strip():
@@ -168,7 +170,8 @@ class State(rx.State):
             on_error=lambda e: self.add_system_message(f"Error: {str(e)}")
         ) as boundary:
             # Add question to chat history
-            self.chat_history.append(QA(question=user_question, answer="", is_loading=True))
+            qa_entry = QA(question=user_question, answer="", is_loading=True)
+            self.chat_history.append(qa_entry)
             yield
 
             # Configure retry behavior
@@ -189,92 +192,26 @@ class State(rx.State):
 
             if success:
                 if self.streaming:
-                    self.chat_history[-1].is_loading = False
+                    qa_entry.is_loading = False
                     async for _ in self.stream_answer(result):
                         yield
                 else:
-                    self.chat_history[-1].answer = self.format_code_blocks(result)
-                    self.chat_history[-1].is_loading = False
+                    qa_entry.answer = self.format_code_blocks(result)
+                    qa_entry.is_loading = False
             else:
                 error_msg = error_handling.format_error_message(
                     boundary.error if boundary.error else Exception("Failed to get response"),
                     user_friendly=True
                 )
-                self.chat_history[-1].answer = error_msg
-                self.chat_history[-1].is_loading = False
-                self.chat_history[-1].is_error = True
-
-            self.system_status = None
-            
-        # Ensure loading state is reset
-        if self.chat_history and self.chat_history[-1].is_loading:
-            self.chat_history[-1].is_loading = False
-
-        max_retries = rag_logic.MAX_RETRIES
-        retry_delay = rag_logic.RETRY_DELAY
-        attempt = 0
-
-        while attempt < max_retries:
-            try:
-                self.system_status = f"Processing your question (attempt {attempt + 1}/{max_retries})..."
-                yield
-
-                answer, success = rag_logic.get_rag_response(
-                    user_question, 
-                    temperature=self.temperature
-                )
-
-                if success:
-                    if self.streaming:
-                        qa_entry.is_loading = False
-                        async for _ in self.stream_answer(answer):
-                            yield
-                    else:
-                        qa_entry.answer = self.format_code_blocks(answer)
-                        qa_entry.is_loading = False
-
-                    self.system_status = None
-                    return
-                
-                attempt += 1
-                if attempt < max_retries:
-                    self.system_status = f"Retrying in {retry_delay}s ({attempt}/{max_retries})"
-                    yield
-                    await asyncio.sleep(retry_delay)
-                else:
-                    raise Exception("Maximum retry attempts reached")
-
-            except Exception as e:
-                print(f"Error processing question (attempt {attempt + 1}): {e}")
-                print(traceback.format_exc())
-                
-                if attempt < max_retries - 1:
-                    attempt += 1
-                    self.system_status = f"Retrying in {retry_delay}s ({attempt}/{max_retries})"
-                    yield
-                    await asyncio.sleep(retry_delay)
-                else:
-                    error_message = (
-                        "I apologize, but I encountered an error while processing your "
-                        "question. This might be due to:\n\n"
-                        "1. Connection issues with the language model\n"
-                        "2. Problems processing your query\n"
-                        "3. System resource constraints\n\n"
-                        "Please try again in a moment."
-                    )
-                    qa_entry.answer = error_message
-                    qa_entry.is_loading = False
-                    qa_entry.is_error = True
-                    self.system_status = "Error occurred"
-                    return
-                    
-        finally:
-            if qa_entry.is_loading:
+                qa_entry.answer = error_msg
                 qa_entry.is_loading = False
                 qa_entry.is_error = True
-                qa_entry.answer = "Request timed out. Please try again."
-                self.system_status = "Timed out"
 
-    def update_status(self, status: str):
-        """Update the system status message."""
-        self.system_status = status
+            self.system_status = None
+
+        # Ensure loading state is reset
+        if qa_entry.is_loading:
+            qa_entry.is_loading = False
+            qa_entry.is_error = True
+            qa_entry.answer = "Request timed out. Please try again."
+            self.system_status = "Timed out"
