@@ -1,95 +1,102 @@
-# Privacy-First RAG Chat Assistant
+# Local RAG Chat Assistant with Gemma
 
-A locally-hosted conversational AI application leveraging Retrieval-Augmented Generation (RAG) technology. Built with cutting-edge open-source tools, this application ensures complete data privacy while providing intelligent responses powered by context-aware document retrieval.
+A powerful, privacy-focused conversational AI that runs completely locally using Google's Gemma model and RAG (Retrieval-Augmented Generation) technology. This application combines modern document retrieval with local LLM capabilities to provide accurate, context-aware responses while maintaining data privacy.
 
-![RAG Architecture](assets/rag_diagram.png)
 
-## Core Technologies
+## Features
 
-- 🔒 100% Local Processing - No cloud dependencies
-- 🤖 Ollama for LLM hosting
-- 🔍 FAISS for efficient vector search
-- ⚡ Reflex for the web interface
-- 🔗 LangChain for RAG orchestration
-- 🤗 Hugging Face for embeddings
+- 🔒 **100% Local Processing**: All operations run on your machine
+- 🤖 **Gemma Integration**: Powered by Google's Gemma model via Ollama
+- 🔍 **Advanced RAG**: FAISS-based vector search for accurate context retrieval
+- ⚡ **Modern UI**: Built with Reflex for a responsive experience
+- 🔄 **Streaming Responses**: Real-time answer generation
+- 📝 **Code Highlighting**: Automatic syntax highlighting for code blocks
+- 💾 **Chat Export**: Export conversations to JSON
+- ⚙️ **Configurable**: Adjustable temperature and streaming settings
 
-## Setup Requirements
+## Prerequisites
 
-Before running the application, ensure you have:
-
-- Python 3.12 or newer
-- Ollama installed locally (https://ollama.com)
-- The Gemma language model: `ollama pull gemma3:4b-it-qat`
+- Python 3.12+
+- [Ollama](https://ollama.com) installed
+- 8GB+ RAM recommended
+- CUDA-compatible GPU (optional, for better performance)
 
 ## Quick Start
 
-1. Get the code:
-
+1. **Clone the Repository**
    ```bash
-   git clone https://github.com/YanCotta/local_rag_chat_app.git
+   git clone https://github.com/YourUsername/local_rag_chat_app.git
    cd local_rag_chat_app
    ```
 
-2. Set up dependencies:
-
+2. **Set Up Environment**
    ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt
    ```
 
-3. Launch the application:
+3. **Install Gemma Model**
+   ```bash
+   ollama pull gemma3:4b-it-qat
+   ```
 
+4. **Launch Application**
    ```bash
    reflex run
    ```
 
-4. Visit http://localhost:3000 in your browser
-
-## Architecture Overview
-
-The application follows a modular architecture:
-
-```
-local_rag_chat_app/
-├── vector_store/       # FAISS index storage
-├── app/               # Core application code
-│   ├── ui.py         # Frontend components
-│   ├── rag.py        # RAG implementation
-│   └── config.py     # Settings
-└── data/             # Document storage
-```
-
-## How RAG Works Here
-
-1. Document Processing:
-   - Text documents are converted to vector embeddings
-   - Vectors are stored in a FAISS database
-
-2. Question Processing:
-   - User questions are vectorized
-   - Similar documents are retrieved
-   - Context-enhanced responses are generated
+5. **Access the Interface**
+   - Open http://localhost:3000 in your browser
 
 ## Configuration
 
-Key settings can be adjusted through environment variables:
+Create a `.env` file in the project root:
 
-- `MODEL_NAME`: Choose your Ollama model
-- `EMBEDDING_MODEL`: Select embedding model
-- `VECTOR_STORE_PATH`: Database location
+```env
+OLLAMA_MODEL=gemma3:4b-it-qat
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+VECTOR_STORE_PATH=./vector_store
+DATASET_SUBSET_SIZE=100
+```
 
-## Credits
+## Project Structure
 
-This project builds upon these amazing tools:
-- LangChain
-- Reflex Framework
-- Ollama
-- FAISS
-- Hugging Face
+```
+local_rag_chat_app/
+├── rag_gemma_reflex/
+│   ├── components.py    # UI components
+│   ├── state.py        # Application state management
+│   ├── styles.py       # UI styling
+│   ├── rag_logic.py    # RAG implementation
+│   └── error_handling.py # Error management
+├── vector_store/       # FAISS index storage
+└── requirements.txt    # Dependencies
+```
+
+## Troubleshooting
+
+- **Ollama Connection Issues**: Ensure Ollama is running (`ollama serve`)
+- **Memory Errors**: Try reducing `DATASET_SUBSET_SIZE` in `.env`
+- **Slow Responses**: Consider using a GPU or reducing context window size
+
+## Development
+
+- Uses modern Python async/await patterns
+- Implements error boundary pattern for robustness
+- Supports hot-reloading during development
+- Includes comprehensive error handling
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Submit a pull request
 
 ## License
 
-Released under MIT License
+MIT License - See [LICENSE](LICENSE) for details
 
 ---
 
-Built with ❤️ for privacy-focused AI applications
+Built with 🚀 using Reflex, LangChain, and Ollama
