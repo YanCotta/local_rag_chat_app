@@ -17,6 +17,25 @@ class State(rx.State):
     question: str = ""
     chat_history: list[QA] = []
     is_loading: bool = False
+    temperature: float = 0.7
+    streaming: bool = True
+
+    def set_temperature(self, value: float):
+        """Update the temperature parameter."""
+        self.temperature = max(0.0, min(1.0, value))
+
+    def toggle_streaming(self):
+        """Toggle streaming responses on/off."""
+        self.streaming = not self.streaming
+
+    async def stream_answer(self, answer: str):
+        """Stream the answer word by word."""
+        words = answer.split()
+        current_answer = ""
+        for word in words:
+            current_answer += word + " "
+            self.chat_history[-1].answer = current_answer.strip()
+            yield
 
     async def handle_submit(self):
         """Handles the user submitting a question."""
@@ -29,23 +48,28 @@ class State(rx.State):
         yield
 
         try:
-            rag_chain = rag_logic.get_rag_chain()
+            answer, success = rag_logic.get_rag_response(
+                user_question, 
+                temperature=self.temperature
+            )
 
-            if rag_chain is None:
-                raise Exception("RAG chain could not be initialized. Check logs.")
+            if not success:
+                self.chat_history[-1].answer = "Sorry, I couldn't process your question. Please try again."
+                self.chat_history[-1].is_loading = False
+                return
 
-            response = await rag_chain.ainvoke({"input": user_question})
-            answer = response.get("answer", "Sorry, I couldn't find an answer.")
-
-            self.chat_history[-1].answer = answer
-            self.chat_history[-1].is_loading = False
+            if self.streaming:
+                self.chat_history[-1].is_loading = False
+                async for _ in self.stream_answer(answer):
+                    yield
+            else:
+                self.chat_history[-1].answer = answer
+                self.chat_history[-1].is_loading = False
 
         except Exception as e:
             print(f"Error processing question: {e}")
             print(traceback.format_exc())
-            self.chat_history[
-                -1
-            ].answer = f"An error occurred: {e}. Check the console logs."
+            self.chat_history[-1].answer = f"An error occurred. Please try again later."
             self.chat_history[-1].is_loading = False
         finally:
             if self.chat_history:
