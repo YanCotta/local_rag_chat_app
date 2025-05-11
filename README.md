@@ -80,12 +80,67 @@ local_rag_chat_app/
 - **Memory Errors**: Try reducing `DATASET_SUBSET_SIZE` in `.env`
 - **Slow Responses**: Consider using a GPU or reducing context window size
 
-## Development
+## Development and Testing
 
-- Uses modern Python async/await patterns
-- Implements error boundary pattern for robustness
-- Supports hot-reloading during development
-- Includes comprehensive error handling
+### Running Tests
+
+The project uses pytest for testing. To run the test suite:
+
+```bash
+# Install test dependencies
+pip install -r requirements.txt
+
+# Run tests with coverage
+pytest
+
+# Generate coverage report
+pytest --cov=rag_gemma_reflex --cov-report=html
+```
+
+### Development Guidelines
+
+1. **Code Style**
+   - Use type hints consistently
+   - Follow PEP 8 guidelines
+   - Document all public functions and classes
+
+2. **Error Handling**
+   - Use custom exception classes from `error_handling.py`
+   - Always log errors appropriately
+   - Provide user-friendly error messages
+
+3. **Performance**
+   - Use batch processing for large operations
+   - Implement proper cleanup for memory management
+   - Monitor and optimize resource usage
+
+4. **Testing**
+   - Write unit tests for new features
+   - Maintain test coverage above 80%
+   - Add integration tests for critical paths
+
+### Monitoring and Debugging
+
+The application includes comprehensive logging:
+
+```python
+import logging
+logger = logging.getLogger(__name__)
+
+# Logs are available in rag_chat.log
+logging.basicConfig(
+    filename='rag_chat.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+```
+
+### Performance Optimization
+
+- FAISS index is cached between sessions
+- Batch processing for document embeddings
+- Memory cleanup after heavy operations
+- Rate limiting to prevent overload
 
 ## Contributing
 
