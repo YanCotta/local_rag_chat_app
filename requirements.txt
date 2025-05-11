@@ -12,6 +12,10 @@ datasets>=3.5.0
 sentence-transformers>=2.2.2
 numpy>=2.2.5
 ollama>=0.4.8
+tqdm>=4.66.2
+tenacity>=8.2.3
+asyncio>=3.4.3
+aiofiles>=23.2.1
 
 # Web framework dependencies
 fastapi>=0.115.12
