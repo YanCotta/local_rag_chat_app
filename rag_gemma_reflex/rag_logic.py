@@ -149,7 +149,9 @@ def create_or_load_vector_store(documents, embeddings):
             print("Attempting to rebuild the index...")
             vector_store = None
     else:
-        vector_store = None    if vector_store is None:
+        vector_store = None
+    
+    if vector_store is None:
         if not documents:
             print("Error: No documents loaded to create FAISS index.")
             return None
