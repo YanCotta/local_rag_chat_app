@@ -25,7 +25,7 @@ A powerful, privacy-focused conversational AI that runs completely locally using
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/YourUsername/local_rag_chat_app.git
+   git clone https://github.com/YanCotta/local_rag_chat_app.git
    cd local_rag_chat_app
    ```
 
